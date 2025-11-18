@@ -160,6 +160,26 @@
             <button class="chart-type-btn" onclick="switchChartType('bar')">Bar Chart</button>
         </div>
 
+        <div id="axisControlsSection" style="display: none; text-align: center; margin: 15px 0; gap: 15px; flex-wrap: wrap; justify-content: center;">
+            <div>
+                <label for="xAxisName">X-Axis Name:</label>
+                <input type="text" id="xAxisName" placeholder="Categories" style="padding: 8px; border: 2px solid #ddd; border-radius: 4px; width: 120px;" />
+            </div>
+            <div>
+                <label for="yAxisName">Y-Axis Name:</label>
+                <input type="text" id="yAxisName" placeholder="Values" style="padding: 8px; border: 2px solid #ddd; border-radius: 4px; width: 120px;" />
+            </div>
+            <div>
+                <label for="xAxisStep">X-Axis Step:</label>
+                <input type="number" id="xAxisStep" placeholder="Auto" style="padding: 8px; border: 2px solid #ddd; border-radius: 4px; width: 100px;" />
+            </div>
+            <div>
+                <label for="yAxisStep">Y-Axis Step:</label>
+                <input type="number" id="yAxisStep" placeholder="Auto" style="padding: 8px; border: 2px solid #ddd; border-radius: 4px; width: 100px;" />
+            </div>
+            <button onclick="updateAxisSettings()" style="background-color: #2196F3; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer;">Apply</button>
+        </div>
+
         <div class="chart-container" id="lineChartContainer">
             <canvas id="lineChart"></canvas>
         </div>
@@ -221,6 +241,7 @@
 
                     document.getElementById('lineChartContainer').classList.add('show');
                     document.getElementById('chartTypeSelector').classList.add('show');
+                    document.getElementById('axisControlsSection').style.display = 'block';
                     document.getElementById('exportSection').classList.add('show');
                     const chartTitle = document.getElementById('chartTitle').value.trim() || 'Line Chart from CSV Data';
                     createAllCharts(data, chartTitle);
@@ -241,6 +262,144 @@
             if (lines.length < 2) {
                 throw new Error('CSV must contain at least 2 rows');
             }
+
+            // Detect format: check if first line has ";;;;" (multi-test format)
+            if (lines[0].includes(';;;;')) {
+                return parseMultiTestFormat(lines);
+            } else {
+                return parseSingleTestFormat(lines);
+            }
+        }
+
+        function parseMultiTestFormat(lines) {
+            // Auto-detect where test names, headers, and data are
+            // Test names row: has test names separated by ;;;;
+            // Header row: contains column names like "Load,Value"
+            // Data rows: contain numeric values
+
+            let testNamesRow = -1;
+            let headerRow = -1;
+            let dataStartRow = -1;
+
+            // Find header row (contains "," like "Load,Value")
+            for (let i = 0; i < Math.min(lines.length, 10); i++) {
+                if (lines[i].includes(',')) {
+                    headerRow = i;
+                    break;
+                }
+            }
+
+            if (headerRow === -1) {
+                throw new Error('Could not find header row with column definitions (should contain comma)');
+            }
+
+            // Find test names row (should be before header row, contains any non-empty cells)
+            for (let i = headerRow - 1; i >= 0; i--) {
+                const cells = lines[i].split(';');
+                // Check if row has any non-empty cells (test names can be anything: letters, numbers, hyphens, etc.)
+                const hasContent = cells.some(cell => cell.trim() !== '');
+
+                if (hasContent) {
+                    testNamesRow = i;
+                    break;
+                }
+            }
+
+            if (testNamesRow === -1) {
+                throw new Error('Could not find test names row. Expected a row with test names before the header row.');
+            }
+
+            // Data starts after header row
+            dataStartRow = headerRow + 1;
+
+            // Parse test names (get non-empty cells)
+            const testNamesCells = lines[testNamesRow].split(';');
+            const testNames = [];
+
+            testNamesCells.forEach((name) => {
+                if (name.trim() !== '') {
+                    testNames.push(name.trim());
+                }
+            });
+
+            if (testNames.length === 0) {
+                throw new Error('No test names found in row');
+            }
+
+            // Parse header row to get axis names for each test
+            const headerCells = lines[headerRow].split(';');
+            const headers = headerCells.filter(h => h.trim() !== ''); // Get non-empty headers
+            const datasets = [];
+
+            // Create datasets: assume headers and test names correspond in order
+            testNames.forEach((testName, testIdx) => {
+                const headerStr = headers[testIdx] || '';
+                const axisNames = headerStr.split(',').map(h => h.trim()).filter(h => h);
+
+                axisNames.forEach((axisName) => {
+                    const datasetLabel = `${testName} ${axisName}`;
+                    datasets.push({
+                        label: datasetLabel,
+                        data: [],
+                        markers: [],
+                        borderColor: getColor(datasets.length),
+                        backgroundColor: getColor(datasets.length, 0.1),
+                        tension: 0.3,
+                        fill: false,
+                        testIdx: testIdx
+                    });
+                });
+            });
+
+            // Parse data rows
+            const labels = [];
+            let rowCount = 0;
+            for (let i = dataStartRow; i < lines.length; i++) {
+                if (lines[i].trim() === '') continue;
+
+                const cells = lines[i].split(';');
+
+                // Get non-empty data cells (matching how we parsed headers)
+                const dataCells = cells.filter((_, idx) => cells[idx].trim() !== '');
+
+                // Use the first value as label
+                const firstCellData = dataCells[0] || '';
+                if (firstCellData) {
+                    const labelValue = firstCellData.includes(',') ? firstCellData.split(',')[0] : firstCellData;
+                    labels.push(labelValue);
+                } else {
+                    labels.push(`Point ${rowCount}`);
+                }
+                rowCount++;
+
+                // Add data to datasets
+                let datasetIdx = 0;
+                testNames.forEach((testName, testIdx) => {
+                    const cellData = dataCells[testIdx] || '';
+
+                    if (cellData) {
+                        const values = cellData.split(',').map(v => parseFloat(v.trim()));
+                        values.forEach((val) => {
+                            if (!isNaN(val) && datasetIdx < datasets.length) {
+                                datasets[datasetIdx].data.push(val);
+                                datasets[datasetIdx].markers.push(false);
+                                datasetIdx++;
+                            }
+                        });
+                    } else {
+                        // If no data, skip datasets for this test
+                        const headerStr = headers[testIdx] || '';
+                        const axisCount = headerStr.split(',').filter(h => h.trim()).length;
+                        datasetIdx += axisCount;
+                    }
+                });
+            }
+
+            return { labels, datasets };
+        }
+
+        function parseSingleTestFormat(lines) {
+            // Original format: single test with headers, colors, markers
 
             // Parse header row
             const headers = parseCSVLine(lines[0]);
@@ -468,7 +627,7 @@
                             ctx.fillText(dataset.label, x, y);
                         }
 
-                        // Draw markers (black X) at marked points
+                        // Draw markers at marked points (colored by dataset)
                         if (dataset.markers) {
                             meta.data.forEach((point, pointIndex) => {
                                 const marker = dataset.markers[pointIndex];
@@ -477,7 +636,7 @@
                                     const y = point.y;
                                     const size = 6;
 
-                                    ctx.strokeStyle = '#000000';
+                                    ctx.strokeStyle = dataset.borderColor;
                                     ctx.lineWidth = 2;
                                     ctx.lineCap = 'round';
 
@@ -495,7 +654,7 @@
 
                                     // Draw text if marker has custom text (not 'Y')
                                     if (marker && marker !== '') {
-                                        ctx.fillStyle = '#000000';
+                                        ctx.fillStyle = dataset.borderColor;
                                         ctx.font = '11px Arial';
                                         ctx.textBaseline = 'bottom';
                                         ctx.textAlign = 'center';
@@ -583,7 +742,7 @@
                             ctx.fillText(dataset.label, x, y);
                         }
 
-                        // Draw markers (black X) at marked points
+                        // Draw markers at marked points (colored by dataset)
                         if (dataset.markers) {
                             meta.data.forEach((point, pointIndex) => {
                                 const marker = dataset.markers[pointIndex];
@@ -592,7 +751,7 @@
                                     const y = point.y;
                                     const size = 6;
 
-                                    ctx.strokeStyle = '#000000';
+                                    ctx.strokeStyle = dataset.borderColor;
                                     ctx.lineWidth = 2;
                                     ctx.lineCap = 'round';
 
@@ -607,7 +766,7 @@
                                     ctx.stroke();
 
                                     if (marker && marker !== '') {
-                                        ctx.fillStyle = '#000000';
+                                        ctx.fillStyle = dataset.borderColor;
                                         ctx.font = '11px Arial';
                                         ctx.textBaseline = 'bottom';
                                         ctx.textAlign = 'center';
@@ -672,7 +831,7 @@
                     chart.data.datasets.forEach((dataset, datasetIndex) => {
                         const meta = chart.getDatasetMeta(datasetIndex);
 
-                        // Draw markers (black X) at marked points
+                        // Draw markers at marked points (colored by dataset)
                         if (dataset.markers) {
                             meta.data.forEach((element, pointIndex) => {
                                 const marker = dataset.markers[pointIndex];
@@ -681,7 +840,7 @@
                                     const y = element.y;
                                     const size = 6;
 
-                                    ctx.strokeStyle = '#000000';
+                                    ctx.strokeStyle = dataset.borderColor;
                                     ctx.lineWidth = 2;
                                     ctx.lineCap = 'round';
 
@@ -696,7 +855,7 @@
                                     ctx.stroke();
 
                                     if (marker && marker !== '') {
-                                        ctx.fillStyle = '#000000';
+                                        ctx.fillStyle = dataset.borderColor;
                                         ctx.font = '11px Arial';
                                         ctx.textBaseline = 'bottom';
                                         ctx.textAlign = 'center';
@@ -773,6 +932,68 @@
                 link.click();
             }).catch(err => {
                 showError('Error exporting chart: ' + err.message);
+            });
+        }
+
+        function updateAxisSettings() {
+            const xAxisName = document.getElementById('xAxisName').value || 'Categories';
+            const yAxisName = document.getElementById('yAxisName').value || 'Values';
+            const xStep = document.getElementById('xAxisStep').value;
+            const yStep = document.getElementById('yAxisStep').value;
+
+            // Convert to numbers or null if empty
+            const xStepValue = xStep ? parseInt(xStep) : null;
+            const yStepValue = yStep ? parseFloat(yStep) : null;
+
+            // Update all three charts
+            [charts.line, charts.area, charts.bar].forEach(chart => {
+                if (chart) {
+                    // Update Y-axis settings
+                    if (chart.options.scales.y) {
+                        // Update axis name
+                        if (!chart.options.scales.y.title) {
+                            chart.options.scales.y.title = {};
+                        }
+                        chart.options.scales.y.title.text = yAxisName;
+
+                        // Update Y-axis step
+                        if (yStepValue) {
+                            if (!chart.options.scales.y.ticks) {
+                                chart.options.scales.y.ticks = {};
+                            }
+                            chart.options.scales.y.ticks.stepSize = yStepValue;
+                        } else {
+                            if (chart.options.scales.y.ticks) {
+                                delete chart.options.scales.y.ticks.stepSize;
+                            }
+                        }
+                    }
+
+                    // Update X-axis settings
+                    if (chart.options.scales.x) {
+                        // Update axis name
+                        if (!chart.options.scales.x.title) {
+                            chart.options.scales.x.title = {};
+                        }
+                        chart.options.scales.x.title.text = xAxisName;
+
+                        // Update X-axis step
+                        if (xStepValue && xStepValue > 0) {
+                            if (!chart.options.scales.x.ticks) {
+                                chart.options.scales.x.ticks = {};
+                            }
+                            chart.options.scales.x.ticks.callback = function(value, index) {
+                                return index % xStepValue === 0 ? this.getLabelForValue(value) : '';
+                            };
+                        } else {
+                            if (chart.options.scales.x.ticks) {
+                                delete chart.options.scales.x.ticks.callback;
+                            }
+                        }
+                    }
+
+                    chart.update();
+                }
             });
         }
     </script>
