@@ -99,6 +99,9 @@
             <strong>To customize colors:</strong> Add a row with <code>__Color__</code> as the first value, then add color names for each column.
             <br><strong>Available colors:</strong> red, pink, orange, yellow, green, teal, blue, purple, indigo, gray, black, white, lime, navy, maroon, olive, aqua, silver
             <br><strong>Or use hex codes:</strong> #FF6384, #36A2EB, etc.
+            <br><br>
+            <strong>To add markers (optional):</strong> Add a <code>Marker</code> column. Format: <code>DatasetName</code> or <code>DatasetName:TEXT</code>
+            <br>Examples: <code>Sales</code>, <code>Revenue:PEAK</code>, <code>Expenses:ALERT</code>
         </div>
         
         <div class="chart-container" id="chartContainer">
@@ -168,6 +171,17 @@
                 throw new Error('CSV must contain at least 2 columns');
             }
 
+            // Identify data columns and find marker column
+            const dataColumnIndices = [];
+            const markerColumnIndex = headers.indexOf('Marker');
+
+            for (let i = 1; i < headers.length; i++) {
+                const header = headers[i];
+                if (header !== 'Marker' && !header.endsWith('_Color')) {
+                    dataColumnIndices.push(i);
+                }
+            }
+
             // Extract colors if a __Color__ row exists
             let colorRow = null;
             let dataStartIndex = 1;
@@ -185,13 +199,13 @@
             const datasets = [];
 
             // Initialize datasets for each data column
-            for (let i = 1; i < headers.length; i++) {
-                let color = getColor(i - 1);
-                let bgColor = getColor(i - 1, 0.1);
+            dataColumnIndices.forEach((colIndex, idx) => {
+                let color = getColor(idx);
+                let bgColor = getColor(idx, 0.1);
 
                 // Use custom color from __Color__ row if available
-                if (colorRow && colorRow[i]) {
-                    const colorValue = colorRow[i].trim();
+                if (colorRow && colorRow[colIndex]) {
+                    const colorValue = colorRow[colIndex].trim();
                     if (colorValue) {
                         color = colorNameToHex(colorValue);
                         bgColor = hexToRgba(color, 0.1);
@@ -199,14 +213,15 @@
                 }
 
                 datasets.push({
-                    label: headers[i],
+                    label: headers[colIndex],
                     data: [],
+                    markers: [],
                     borderColor: color,
                     backgroundColor: bgColor,
                     tension: 0.3,
                     fill: false
                 });
-            }
+            });
 
             // Parse data rows
             for (let i = dataStartIndex; i < lines.length; i++) {
@@ -215,11 +230,32 @@
                 const values = parseCSVLine(lines[i]);
                 labels.push(values[0]);
 
-                // Add values to respective datasets
-                for (let j = 1; j < values.length && j <= datasets.length; j++) {
-                    const value = parseFloat(values[j]);
-                    datasets[j - 1].data.push(isNaN(value) ? null : value);
+                // Check if this row has a marker and determine which dataset gets it
+                let markersByDataset = {}; // { datasetIndex: markerText }
+                if (markerColumnIndex !== -1 && values[markerColumnIndex]) {
+                    const markerValue = values[markerColumnIndex].trim();
+                    if (markerValue) {
+                        // Parse format: "DatasetName" or "DatasetName:TEXT"
+                        const parts = markerValue.split(':');
+                        const datasetName = parts[0].trim();
+                        const markerText = parts[1] ? parts[1].trim() : '';
+
+                        // Find the dataset index that matches this name
+                        for (let idx = 0; idx < dataColumnIndices.length; idx++) {
+                            if (headers[dataColumnIndices[idx]].toLowerCase() === datasetName.toLowerCase()) {
+                                markersByDataset[idx] = markerText;
+                                break;
+                            }
+                        }
+                    }
                 }
+
+                // Add values to respective datasets
+                dataColumnIndices.forEach((colIndex, idx) => {
+                    const value = parseFloat(values[colIndex]);
+                    datasets[idx].data.push(isNaN(value) ? null : value);
+                    datasets[idx].markers.push(idx in markersByDataset ? markersByDataset[idx] : false);
+                });
             }
 
             return { labels, datasets };
@@ -307,12 +343,14 @@
                 chart.destroy();
             }
 
-            // Custom plugin to add labels in the middle of lines
+            // Custom plugin to add labels and markers
             const lineLabelsPlugin = {
                 afterDatasetsDraw(chart) {
                     const ctx = chart.ctx;
                     chart.data.datasets.forEach((dataset, datasetIndex) => {
                         const meta = chart.getDatasetMeta(datasetIndex);
+
+                        // Draw labels in the middle
                         const middleIndex = Math.floor(meta.data.length / 2);
                         const middlePoint = meta.data[middleIndex];
 
@@ -324,6 +362,43 @@
                             ctx.font = 'bold 12px Arial';
                             ctx.textBaseline = 'middle';
                             ctx.fillText(dataset.label, x, y);
+                        }
+
+                        // Draw markers (black X) at marked points
+                        if (dataset.markers) {
+                            meta.data.forEach((point, pointIndex) => {
+                                const marker = dataset.markers[pointIndex];
+                                if (marker !== false && point) {
+                                    const x = point.x;
+                                    const y = point.y;
+                                    const size = 6;
+
+                                    ctx.strokeStyle = '#000000';
+                                    ctx.lineWidth = 2;
+                                    ctx.lineCap = 'round';
+
+                                    // Draw first diagonal line (\)
+                                    ctx.beginPath();
+                                    ctx.moveTo(x - size, y - size);
+                                    ctx.lineTo(x + size, y + size);
+                                    ctx.stroke();
+
+                                    // Draw second diagonal line (/)
+                                    ctx.beginPath();
+                                    ctx.moveTo(x + size, y - size);
+                                    ctx.lineTo(x - size, y + size);
+                                    ctx.stroke();
+
+                                    // Draw text if marker has custom text (not 'Y')
+                                    if (marker && marker !== '') {
+                                        ctx.fillStyle = '#000000';
+                                        ctx.font = '11px Arial';
+                                        ctx.textBaseline = 'bottom';
+                                        ctx.textAlign = 'center';
+                                        ctx.fillText(marker, x, y - 12);
+                                    }
+                                }
+                            });
                         }
                     });
                 }
