@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CSV to Line Chart</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -44,6 +45,22 @@
         }
         button:hover {
             background-color: #45a049;
+        }
+        button.export-btn {
+            background-color: #2196F3;
+            margin-top: 15px;
+            margin-left: 0;
+        }
+        button.export-btn:hover {
+            background-color: #0b7dda;
+        }
+        .export-section {
+            text-align: center;
+            margin-top: 20px;
+            display: none;
+        }
+        .export-section.show {
+            display: block;
         }
         .chart-container {
             position: relative;
@@ -89,6 +106,9 @@
         <div class="input-section">
             <input type="file" id="csvFile" accept=".csv" />
             <button onclick="generateChart()">Generate Chart</button>
+            <br><br>
+            <label for="chartTitle">Chart Title (optional):</label>
+            <input type="text" id="chartTitle" placeholder="Enter chart title" style="padding: 10px; border: 2px solid #ddd; border-radius: 4px; width: 250px; margin-left: 10px;" />
         </div>
         
         <div class="error" id="error"></div>
@@ -106,6 +126,10 @@
         
         <div class="chart-container" id="chartContainer">
             <canvas id="lineChart"></canvas>
+        </div>
+
+        <div class="export-section" id="exportSection">
+            <button class="export-btn" onclick="exportChart()">Export as JPG</button>
         </div>
     </div>
 
@@ -145,7 +169,9 @@
                     }
 
                     chartContainer.classList.add('show');
-                    createChart(data);
+                    document.getElementById('exportSection').classList.add('show');
+                    const chartTitle = document.getElementById('chartTitle').value.trim() || 'Line Chart from CSV Data';
+                    createChart(data, chartTitle);
                 } catch (error) {
                     showError('Error parsing CSV: ' + error.message);
                 }
@@ -336,7 +362,7 @@
             return colors[index % colors.length];
         }
 
-        function createChart(data) {
+        function createChart(data, chartTitle = 'Line Chart from CSV Data') {
             const ctx = document.getElementById('lineChart').getContext('2d');
             
             if (chart) {
@@ -415,12 +441,11 @@
                     maintainAspectRatio: false,
                     plugins: {
                         legend: {
-                            display: true,
-                            position: 'top'
+                            display: false
                         },
                         title: {
                             display: true,
-                            text: 'Line Chart from CSV Data'
+                            text: chartTitle
                         }
                     },
                     scales: {
@@ -447,6 +472,27 @@
             const errorDiv = document.getElementById('error');
             errorDiv.textContent = message;
             errorDiv.classList.add('show');
+        }
+
+        function exportChart() {
+            const chartContainer = document.getElementById('chartContainer');
+            const chartTitle = document.getElementById('chartTitle').value.trim() || 'chart';
+            // Sanitize filename (remove special characters)
+            const sanitizedFilename = chartTitle.replace(/[^a-z0-9_\-]/gi, '_').substring(0, 50);
+
+            html2canvas(chartContainer, {
+                backgroundColor: '#ffffff',
+                scale: 2,
+                logging: false
+            }).then(canvas => {
+                // Convert canvas to JPG
+                const link = document.createElement('a');
+                link.href = canvas.toDataURL('image/jpeg', 0.95);
+                link.download = sanitizedFilename + '.jpg';
+                link.click();
+            }).catch(err => {
+                showError('Error exporting chart: ' + err.message);
+            });
         }
     </script>
 </body>
