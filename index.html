@@ -62,6 +62,36 @@
         .export-section.show {
             display: block;
         }
+        .chart-type-selector {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+            gap: 10px;
+        }
+        .chart-type-selector.show {
+            display: flex;
+            justify-content: center;
+        }
+        .chart-type-btn {
+            background-color: #e0e0e0;
+            color: #333;
+            padding: 8px 16px;
+            border: 2px solid #999;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .chart-type-btn.active {
+            background-color: #4CAF50;
+            color: white;
+            border-color: #4CAF50;
+        }
+        .chart-type-btn:hover {
+            background-color: #b0b0b0;
+        }
+        .chart-type-btn.active:hover {
+            background-color: #45a049;
+        }
         .chart-container {
             position: relative;
             height: 400px;
@@ -124,8 +154,22 @@
             <br>Examples: <code>Sales</code>, <code>Revenue:PEAK</code>, <code>Expenses:ALERT</code>
         </div>
         
-        <div class="chart-container" id="chartContainer">
+        <div class="chart-type-selector" id="chartTypeSelector">
+            <button class="chart-type-btn active" onclick="switchChartType('line')">Line Chart</button>
+            <button class="chart-type-btn" onclick="switchChartType('area')">Area Chart</button>
+            <button class="chart-type-btn" onclick="switchChartType('bar')">Bar Chart</button>
+        </div>
+
+        <div class="chart-container" id="lineChartContainer">
             <canvas id="lineChart"></canvas>
+        </div>
+
+        <div class="chart-container" id="areaChartContainer" style="display: none;">
+            <canvas id="areaChart"></canvas>
+        </div>
+
+        <div class="chart-container" id="barChartContainer" style="display: none;">
+            <canvas id="barChart"></canvas>
         </div>
 
         <div class="export-section" id="exportSection">
@@ -134,7 +178,14 @@
     </div>
 
     <script>
-        let chart = null;
+        let charts = {
+            line: null,
+            area: null,
+            bar: null
+        };
+        let currentChartType = 'line';
+        let currentChartData = null;
+        let currentChartTitle = null;
 
         function generateChart() {
             const fileInput = document.getElementById('csvFile');
@@ -168,10 +219,11 @@
                         return;
                     }
 
-                    chartContainer.classList.add('show');
+                    document.getElementById('lineChartContainer').classList.add('show');
+                    document.getElementById('chartTypeSelector').classList.add('show');
                     document.getElementById('exportSection').classList.add('show');
                     const chartTitle = document.getElementById('chartTitle').value.trim() || 'Line Chart from CSV Data';
-                    createChart(data, chartTitle);
+                    createAllCharts(data, chartTitle);
                 } catch (error) {
                     showError('Error parsing CSV: ' + error.message);
                 }
@@ -362,11 +414,37 @@
             return colors[index % colors.length];
         }
 
-        function createChart(data, chartTitle = 'Line Chart from CSV Data') {
+        function createAllCharts(data, chartTitle) {
+            currentChartData = data;
+            currentChartTitle = chartTitle;
+            createLineChart(data, chartTitle);
+            createAreaChart(data, chartTitle);
+            createBarChart(data, chartTitle);
+        }
+
+        function switchChartType(type) {
+            currentChartType = type;
+
+            // Hide all chart containers
+            document.getElementById('lineChartContainer').style.display = 'none';
+            document.getElementById('areaChartContainer').style.display = 'none';
+            document.getElementById('barChartContainer').style.display = 'none';
+
+            // Show selected chart container
+            document.getElementById(type + 'ChartContainer').style.display = 'block';
+
+            // Update button styles
+            document.querySelectorAll('.chart-type-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+        }
+
+        function createLineChart(data, chartTitle = 'Line Chart from CSV Data') {
             const ctx = document.getElementById('lineChart').getContext('2d');
-            
-            if (chart) {
-                chart.destroy();
+
+            if (charts.line) {
+                charts.line.destroy();
             }
 
             // Custom plugin to add labels and markers
@@ -430,7 +508,7 @@
                 }
             };
 
-            chart = new Chart(ctx, {
+            charts.line = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: data.labels,
@@ -468,6 +546,208 @@
             });
         }
 
+        function createAreaChart(data, chartTitle = 'Area Chart from CSV Data') {
+            const ctx = document.getElementById('areaChart').getContext('2d');
+
+            if (charts.area) {
+                charts.area.destroy();
+            }
+
+            // Create datasets for area chart (with fill)
+            const areaDatasets = data.datasets.map(dataset => ({
+                ...dataset,
+                fill: true,
+                backgroundColor: dataset.backgroundColor,
+                borderColor: dataset.borderColor,
+                tension: 0.3
+            }));
+
+            // Custom plugin to add labels and markers
+            const areaLabelsPlugin = {
+                afterDatasetsDraw(chart) {
+                    const ctx = chart.ctx;
+                    chart.data.datasets.forEach((dataset, datasetIndex) => {
+                        const meta = chart.getDatasetMeta(datasetIndex);
+
+                        // Draw labels in the middle
+                        const middleIndex = Math.floor(meta.data.length / 2);
+                        const middlePoint = meta.data[middleIndex];
+
+                        if (middlePoint && dataset.label) {
+                            const x = middlePoint.x;
+                            const y = middlePoint.y - 15;
+
+                            ctx.fillStyle = dataset.borderColor;
+                            ctx.font = 'bold 12px Arial';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(dataset.label, x, y);
+                        }
+
+                        // Draw markers (black X) at marked points
+                        if (dataset.markers) {
+                            meta.data.forEach((point, pointIndex) => {
+                                const marker = dataset.markers[pointIndex];
+                                if (marker !== false && point) {
+                                    const x = point.x;
+                                    const y = point.y;
+                                    const size = 6;
+
+                                    ctx.strokeStyle = '#000000';
+                                    ctx.lineWidth = 2;
+                                    ctx.lineCap = 'round';
+
+                                    ctx.beginPath();
+                                    ctx.moveTo(x - size, y - size);
+                                    ctx.lineTo(x + size, y + size);
+                                    ctx.stroke();
+
+                                    ctx.beginPath();
+                                    ctx.moveTo(x + size, y - size);
+                                    ctx.lineTo(x - size, y + size);
+                                    ctx.stroke();
+
+                                    if (marker && marker !== '') {
+                                        ctx.fillStyle = '#000000';
+                                        ctx.font = '11px Arial';
+                                        ctx.textBaseline = 'bottom';
+                                        ctx.textAlign = 'center';
+                                        ctx.fillText(marker, x, y - 12);
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            };
+
+            charts.area = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: areaDatasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        title: {
+                            display: true,
+                            text: chartTitle
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Values'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Categories'
+                            }
+                        }
+                    }
+                },
+                plugins: [areaLabelsPlugin]
+            });
+        }
+
+        function createBarChart(data, chartTitle = 'Bar Chart from CSV Data') {
+            const ctx = document.getElementById('barChart').getContext('2d');
+
+            if (charts.bar) {
+                charts.bar.destroy();
+            }
+
+            // Custom plugin to add markers for bar chart
+            const barMarkersPlugin = {
+                afterDatasetsDraw(chart) {
+                    const ctx = chart.ctx;
+                    chart.data.datasets.forEach((dataset, datasetIndex) => {
+                        const meta = chart.getDatasetMeta(datasetIndex);
+
+                        // Draw markers (black X) at marked points
+                        if (dataset.markers) {
+                            meta.data.forEach((element, pointIndex) => {
+                                const marker = dataset.markers[pointIndex];
+                                if (marker !== false && element) {
+                                    const x = element.x;
+                                    const y = element.y;
+                                    const size = 6;
+
+                                    ctx.strokeStyle = '#000000';
+                                    ctx.lineWidth = 2;
+                                    ctx.lineCap = 'round';
+
+                                    ctx.beginPath();
+                                    ctx.moveTo(x - size, y - size);
+                                    ctx.lineTo(x + size, y + size);
+                                    ctx.stroke();
+
+                                    ctx.beginPath();
+                                    ctx.moveTo(x + size, y - size);
+                                    ctx.lineTo(x - size, y + size);
+                                    ctx.stroke();
+
+                                    if (marker && marker !== '') {
+                                        ctx.fillStyle = '#000000';
+                                        ctx.font = '11px Arial';
+                                        ctx.textBaseline = 'bottom';
+                                        ctx.textAlign = 'center';
+                                        ctx.fillText(marker, x, y - 12);
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            };
+
+            charts.bar = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels,
+                    datasets: data.datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'x',
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        title: {
+                            display: true,
+                            text: chartTitle
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Values'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Categories'
+                            }
+                        }
+                    }
+                },
+                plugins: [barMarkersPlugin]
+            });
+        }
+
         function showError(message) {
             const errorDiv = document.getElementById('error');
             errorDiv.textContent = message;
@@ -475,7 +755,8 @@
         }
 
         function exportChart() {
-            const chartContainer = document.getElementById('chartContainer');
+            const chartContainerId = currentChartType + 'ChartContainer';
+            const chartContainer = document.getElementById(chartContainerId);
             const chartTitle = document.getElementById('chartTitle').value.trim() || 'chart';
             // Sanitize filename (remove special characters)
             const sanitizedFilename = chartTitle.replace(/[^a-z0-9_\-]/gi, '_').substring(0, 50);
